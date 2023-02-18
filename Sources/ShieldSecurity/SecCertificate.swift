@@ -34,6 +34,7 @@ public enum SecCertificateError: Int, Error {
 
 public extension SecCertificate {
 
+  /// Create certificate from `Data`
   static func from(data: Data) throws -> SecCertificate {
     guard let cert = SecCertificateCreateWithData(nil, data as CFData) else {
       throw SecCertificateError.parsingFailed
