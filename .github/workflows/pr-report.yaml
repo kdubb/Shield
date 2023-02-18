@@ -1,0 +1,147 @@
+name: Report PR
+
+on:
+  workflow_run:
+    workflows: [PR]
+    types: [completed]
+
+jobs:
+  
+  sonar:
+
+    runs-on: macos-12
+
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+
+    - name: Debug
+      uses: actions/github-script@v6
+      with:
+        script: |
+          console.log(JSON.stringify(context, null, 2))
+
+    - name: Install Tools
+      run: |
+        brew install sonar-scanner
+
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.workflow_run.head_sha }}
+        fetch-depth: 0
+
+    - name: Download Build
+      uses: actions/github-script@v6
+      with:
+        script: |
+          let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             run_id: context.payload.workflow_run.id,
+          });
+          let matchArtifact = allArtifacts.data.artifacts.filter((artifact) => {
+            return artifact.name == "build"
+          })[0];
+          let download = await github.rest.actions.downloadArtifact({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             artifact_id: matchArtifact.id,
+             archive_format: 'zip',
+          });
+          let fs = require('fs');
+          fs.writeFileSync(`${process.env.HOME}/build.tar.gz`, Buffer.from(download.data));
+    
+    - name: Extract Build
+      run: tar -xzf $HOME/build.tar.gz -C $GITHUB_WORKSPACE
+
+    - name: Sonar Scanner
+      run: sonar-scanner
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  report-test-results:
+  
+    runs-on: macos-12
+
+    steps:
+
+    - name: Download Test Results
+      uses: actions/github-script@v6
+      with:
+        script: |
+          let allArtifacts = await github.rest.actions.listWorkflowRunArtifacts({
+             owner: context.repo.owner,
+             repo: context.repo.repo,
+             run_id: context.payload.workflow_run.id,
+          });
+          let matchedArtifacts = allArtifacts.data.artifacts.filter((artifact) => {
+            return artifact.name.startsWith("test-results")
+          });
+          let fs = require('fs');
+          await Promise.all(
+            matchedArtifacts.map(async (artifact) => {
+              let download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip',
+              });
+              fs.writeFileSync(`${process.env.HOME}/${artifact.name}.tar.gz`, Buffer.from(download.data));
+          }));
+
+    - name: Extract macOS Test Results
+      continue-on-error: true
+      run: |
+        tar -xzf $HOME/test-results-macos.tar.gz -C $GITHUB_WORKSPACE
+        echo $PWD
+        ls -al
+        ls -al $HOME || true
+        ls -al $GITHUB_WORKSPACE || true
+        ls -al ./TestResults || true
+        ls -al $HOME/TestResults || true
+        ls -al $GITHUB_WORKSPACE/TestResults || true
+
+    - name: Report macOS Test Results
+      uses: kdubb/xcresulttool@v1
+      continue-on-error: true
+      with:
+          title: Test Results macOS
+          sha: ${{ github.event.workflow_run.head_sha }}
+          path: ./TestResults/macos.xcresult
+
+    - name: Extract iOS Test Results
+      continue-on-error: true
+      run: tar -xzf $HOME/test-results-ios.tar.gz -C $GITHUB_WORKSPACE
+
+    - name: Report iOS Test Results
+      uses: kdubb/xcresulttool@v1
+      continue-on-error: true
+      with:
+          title: Test Results iOS
+          sha: ${{ github.event.workflow_run.head_sha }}
+          path: ./TestResults/ios.xcresult
+
+    - name: Extract tvOS Test Results
+      continue-on-error: true
+      run: tar -xzf $HOME/test-results-tvos.tar.gz -C $GITHUB_WORKSPACE
+
+    - name: Report tvOS Test Results
+      uses: kdubb/xcresulttool@v1
+      continue-on-error: true
+      with:
+          title: Test Results tvOS
+          sha: ${{ github.event.workflow_run.head_sha }}
+          path: ./TestResults/tvos.xcresult
+
+    - name: Extract watchOS Test Results
+      continue-on-error: true
+      run: tar -xzf $HOME/test-results-watchos.tar.gz -C $GITHUB_WORKSPACE
+
+    - name: Report watchOS Test Results
+      uses: kdubb/xcresulttool@v1
+      continue-on-error: true
+      with:
+          title: Test Results watchOS
+          sha: ${{ github.event.workflow_run.head_sha }}
+          path: ./TestResults/watchos.xcresult
