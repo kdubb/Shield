@@ -21,11 +21,6 @@ jobs:
       env:
         HOMEBREW_NO_INSTALL_CLEANUP: 1
 
-    - uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.workflow_run.head_sha }}
-        fetch-depth: 0
-
     - name: Download Build
       uses: actions/github-script@v6
       with:
@@ -50,8 +45,40 @@ jobs:
     - name: Extract Build Results
       run: tar -xzf build-results.tar.gz
 
+    - name: Read PR Number
+      id: pr_number
+      uses: juliangruber/read-file-action@v1
+      with:
+        path: .build/pr_number
+
+    - name: Get PR Data
+      uses: octokit/request-action@v2.x
+      id: pr_data
+      with:
+        route: GET /repos/{full_name}/pulls/{number}
+        full_name: ${{ github.event.repository.full_name }}
+        number: ${{ steps.pr_number.outputs.content }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Checkout PR
+      uses: actions/checkout@v3
+      with:
+        repository: ${{ github.event.workflow_run.head_repository.full_name }}
+        ref: ${{ github.event.workflow_run.head_sha }}
+        fetch-depth: 0
+
+    - name: Checkout Base Branch
+      run: |
+        git remote add upstream ${{ github.event.repository.clone_url }}
+        git fetch upstream
+        git checkout -B ${{ fromJson(steps.pr_data.outputs.data).base.ref }} upstream/${{ fromJson(steps.pr_data.outputs.data).base.ref }}
+        git checkout ${{ github.event.workflow_run.head_branch }}
+        git clean -ffdx && git reset --hard HEAD
+
     - name: Sonar Scanner
-      run: sonar-scanner
+      run: |
+        sonar-scanner -Dsonar.scm.revision=${{ github.event.workflow_run.head_sha }} -Dsonar.pullrequest.key=${{ fromJson(steps.pr_data.outputs.data).number }} -Dsonar.pullrequest.branch=${{ fromJson(steps.pr_data.outputs.data).head.ref }} -Dsonar.pullrequest.base=${{ fromJson(steps.pr_data.outputs.data).base.ref }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
